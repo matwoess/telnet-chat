@@ -4,7 +4,7 @@ use ansi_term::Color;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 
-use crate::{ChangeColor, Command, CommandError, Invalid, Quit};
+use crate::{ChangeColor, Command, CommandError, EmptyStatement, Invalid, Quit};
 use crate::model::Statement;
 
 pub(crate) async fn write_to_socket(socket: &mut TcpStream, msg: String) -> io::Result<()> {
@@ -39,7 +39,7 @@ pub(crate) async fn get_from_socket(socket: &mut TcpStream) -> Result<Statement,
         }
     };
     if statement_str.is_empty() {
-        return Err(CommandError::new("Empty statement!"));
+        return Ok(EmptyStatement);
     }
     let statement = if statement_str.starts_with('/') {
         let args: Vec<&str> = statement_str.split(' ').collect();

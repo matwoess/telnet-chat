@@ -28,8 +28,12 @@ impl User {
         Self { name, color, tx, rx }
     }
 
+    pub(crate) fn get_name_prefix(&self) -> String {
+        self.color.paint(format!("[{}]", self.name)).to_string()
+    }
+
     pub(crate) fn get_prompt(&self) -> String {
-        self.color.paint(format!("\r[{}]: ", self.name)).to_string()
+        format!("\r{}: ", self.get_name_prefix())
     }
 
     pub(crate) fn format_message(&self, msg: String) -> String {
@@ -48,4 +52,5 @@ pub(crate) enum CommandType {
 pub(crate) enum Statement {
     Command(CommandType),
     Message(String),
+    EmptyStatement,
 }

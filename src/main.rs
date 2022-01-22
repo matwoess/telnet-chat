@@ -1,13 +1,14 @@
 use tokio::{
-    io::{self, AsyncWriteExt},
+    io::{self},
     net::TcpListener,
     net::TcpStream,
     sync::{broadcast, broadcast::Receiver},
 };
+use tokio::io::AsyncWriteExt;
 use tokio::sync::broadcast::Sender;
 
 use model::CommandType::{ChangeColor, Invalid, Quit};
-use model::Statement::{Command, Message};
+use model::Statement::{EmptyStatement, Command, Message};
 
 use crate::error::CommandError;
 use crate::model::User;
@@ -26,14 +27,16 @@ async fn main() -> io::Result<()> {
     let listener = TcpListener::bind(address).await?;
     let (tx, rx) = broadcast::channel(16);
     tokio::spawn(async move {
-        server_receiver(rx).await
+        server_receiver(rx).await;
     });
     loop {
         let (socket, addr) = listener.accept().await?;
         println!("Listening to {}", addr);
         let tx = tx.clone();
         tokio::spawn(async move {
-            handle_connection(socket, tx).await
+            if let Err(e) = handle_connection(socket, tx).await {
+                eprintln!("Exited connection with error: {:?}", e);
+            }
         });
     }
 }
@@ -53,7 +56,11 @@ async fn handle_connection(mut socket: TcpStream<>, tx: Sender<String>) -> io::R
         Ok(stmt) => match stmt {
             Message(msg) => msg,
             Command(_) => {
-                write_str_to_socket(&mut socket, "Names cannot start with '/'\r\n").await?;
+                write_str_to_socket(&mut socket, "Name cannot start with '/'\r\n").await?;
+                return Ok(());
+            }
+            EmptyStatement => {
+                write_str_to_socket(&mut socket, "Name cannot be empty\r\n").await?;
                 return Ok(());
             }
         },
@@ -63,19 +70,22 @@ async fn handle_connection(mut socket: TcpStream<>, tx: Sender<String>) -> io::R
         }
     };
     let mut user = User::new(username, tx);
+    match user.tx.send(format!("> {} has joined the chat", user.get_name_prefix())) {
+        Ok(_) => {},
+        Err(e) => println!("error while sending: {}", e),
+    }
     loop {
         write_to_socket(&mut socket, user.get_prompt()).await?;
         tokio::select! {
         msg = user.rx.recv() => {
                 match msg {
                     Ok(msg) => {
-                        if !msg.contains(user.get_prompt().as_str()) {
+                        if !msg.contains(user.get_name_prefix().as_str()) {
                             write_to_socket(&mut socket, format!("\r{}\r\n", msg)).await?;
                         }
                     }
                     Err(e) => {
                         eprintln!("error: {:?}", e);
-                        socket.shutdown().await?;
                         break;
                     }
                 }
@@ -84,6 +94,7 @@ async fn handle_connection(mut socket: TcpStream<>, tx: Sender<String>) -> io::R
                 match stmt {
                     Ok(stmt) => {
                         match stmt {
+                            EmptyStatement => println!("empty statement!"),
                             Message(msg) => {
                                 match user.tx.send(user.format_message(msg)) {
                                     Ok(_) => {},
@@ -93,7 +104,6 @@ async fn handle_connection(mut socket: TcpStream<>, tx: Sender<String>) -> io::R
                             Command(kind) => {
                                match kind {
                                     Quit => {
-                                        socket.shutdown().await?;
                                         break;
                                     }
                                     ChangeColor(to_color) =>{
@@ -111,12 +121,16 @@ async fn handle_connection(mut socket: TcpStream<>, tx: Sender<String>) -> io::R
                     }
                     Err(e) => {
                         eprintln!("{:?}", e);
-                        socket.shutdown().await?;
                         break;
                     }
                 };
             }
         }
     }
+    match user.tx.send(format!("> {} has left the chat", user.get_name_prefix())) {
+        Ok(_) => {},
+        Err(e) => println!("error while sending: {}", e),
+    }
+    socket.shutdown().await?;
     Ok(())
 }
