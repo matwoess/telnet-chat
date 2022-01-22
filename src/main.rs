@@ -1,91 +1,25 @@
-use std::collections::LinkedList;
 use std::sync::Arc;
 
-use ansi_term::Color;
-use rand::{prelude::IteratorRandom, thread_rng};
 use tokio::{
     io::{self, AsyncWriteExt},
     net::TcpListener,
     net::TcpStream,
-    sync::{broadcast, broadcast::{Receiver, Sender}, Mutex},
+    sync::{broadcast, broadcast::Receiver, Mutex},
 };
 
-use CommandType::{ChangeColor, Invalid, Quit};
-use Statement::{Command, Message};
+use model::{State, Statement};
+use model::CommandType::{ChangeColor, Invalid, Quit};
+use model::Statement::{Command, Message};
 
 use crate::error::CommandError;
+use crate::util::*;
 
 mod error;
+mod model;
+mod util;
 
 const SERVER: &str = "localhost";
 const PORT: &str = "8001";
-
-const COLORS: [Color; 6] = [
-    Color::Red,
-    Color::Green,
-    Color::Blue,
-    Color::Yellow,
-    Color::Cyan,
-    Color::Purple,
-];
-
-#[derive(Debug)]
-struct State {
-    server_tx: Sender<String>,
-    //users: HashMap<String, User>,
-    messages: LinkedList<String>,
-}
-
-impl State {
-    fn new(tx: Sender<String>) -> Self {
-        Self { server_tx: tx, /*users: HashMap::new(),*/ messages: LinkedList::new() }
-    }
-
-    fn log_in(&mut self, username: &String) -> User {
-        let client_tx = self.server_tx.clone();
-        let client_rx = self.server_tx.subscribe();
-        let user = User::new(username.clone(), client_tx, client_rx);
-        //self.users.insert(username, user);
-        return user;
-    }
-}
-
-#[derive(Debug)]
-struct User {
-    name: String,
-    color: Color,
-    tx: Sender<String>,
-    rx: Receiver<String>,
-}
-
-impl User {
-    fn new(name: String, tx: Sender<String>, rx: Receiver<String>) -> Self {
-        let color_idx = (0..COLORS.len()).choose(&mut thread_rng()).unwrap();
-        let color = COLORS[color_idx];
-        Self { name, color, tx, rx }
-    }
-
-    fn get_prompt(&self) -> String {
-        self.color.paint(format!("\r[{}]: ", self.name)).to_string()
-    }
-
-    fn format_message(&self, msg: String) -> String {
-        format!("{}{}", self.get_prompt(), msg)
-    }
-}
-
-#[derive(Debug)]
-enum CommandType {
-    Quit,
-    ChangeColor(String),
-    Invalid,
-}
-
-#[derive(Debug)]
-enum Statement {
-    Command(CommandType),
-    Message(String),
-}
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -106,9 +40,9 @@ async fn main() -> io::Result<()> {
     }
 }
 
-async fn server_receiver(mut receiver: Receiver<String>) {
+async fn server_receiver(mut rx: Receiver<String>) {
     loop {
-        match receiver.recv().await {
+        match rx.recv().await {
             Ok(msg) => println!("Broadcast message: '{}'", msg),
             Err(e) => eprintln!("error: {}", e),
         }
@@ -137,7 +71,7 @@ async fn handle_connection(mut socket: TcpStream<>, state: Arc<Mutex<State>>) ->
         msg = user.rx.recv() => {
                 match msg {
                     Ok(msg) => {
-                        if !msg.contains(format!("[{}]", user.name).as_str()) {
+                        if !msg.contains(user.get_prompt().as_str()) {
                             write_to_socket(&mut socket, format!("\r{}\r\n", msg)).await?;
                         }
                     }
@@ -165,19 +99,9 @@ async fn handle_connection(mut socket: TcpStream<>, state: Arc<Mutex<State>>) ->
                                         break;
                                     }
                                     ChangeColor(to_color) =>{
-                                        let new_color = match to_color.as_str() {
-                                            "red" => Color::Red,
-                                            "green" => Color::Green,
-                                            "blue" => Color::Blue,
-                                            "yellow" => Color::Yellow,
-                                            "cyan" => Color::Cyan,
-                                            "purple" => Color::Purple,
-                                            _ => user.color
-                                        };
-                                        if new_color == user.color {
-                                            write_str_to_socket(&mut socket, "Invalid color change\r\n").await?;
-                                        } else {
-                                            user.color = new_color;
+                                        match get_color_from_string(to_color) {
+                                            None => write_str_to_socket(&mut socket, "Invalid color!\r\n").await?,
+                                            Some(col) => user.color = col,
                                         }
                                     }
                                     Invalid => {
@@ -197,58 +121,4 @@ async fn handle_connection(mut socket: TcpStream<>, state: Arc<Mutex<State>>) ->
         }
     }
     Ok(())
-}
-
-async fn write_to_socket(socket: &mut TcpStream, msg: String) -> io::Result<()> {
-    socket.write_all(msg.as_bytes()).await
-}
-
-async fn write_str_to_socket(socket: &mut TcpStream, msg: &str) -> io::Result<()> {
-    socket.write_all(msg.as_bytes()).await
-}
-
-async fn get_from_socket(socket: &mut TcpStream) -> Result<Statement, CommandError> {
-    let mut msg = vec![0; 1024];
-    loop {
-        socket.readable().await?;
-        match socket.try_read(&mut msg) {
-            Ok(n) => {
-                msg.truncate(n);
-                break;
-            }
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                continue;
-            }
-            Err(e) => {
-                return Err(e.into());
-            }
-        }
-    }
-    let statement_str = match String::from_utf8(msg) {
-        Ok(s) => s.replace("\r\n", ""),
-        Err(e) => {
-            return Err(CommandError::FromUtf8(e.into()));
-        }
-    };
-    if statement_str.is_empty() {
-        return Err(CommandError::new("Empty statement!"));
-    }
-    let statement = if statement_str.starts_with('/') {
-        let args: Vec<&str> = statement_str.split(' ').collect();
-        match args[0] {
-            "/quit" => Command(Quit),
-            "/color" => {
-                if args.len() <= 1 {
-                    Command(Invalid)
-                } else {
-                    Command(ChangeColor(String::from(args[1])))
-                }
-            }
-            _ => Command(Invalid)
-        }
-    } else {
-        Statement::Message(statement_str)
-    };
-    println!("From socket: {:?}", statement);
-    Ok(statement)
 }
