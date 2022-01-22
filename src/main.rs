@@ -1,17 +1,16 @@
-use std::sync::Arc;
-
 use tokio::{
     io::{self, AsyncWriteExt},
     net::TcpListener,
     net::TcpStream,
-    sync::{broadcast, broadcast::Receiver, Mutex},
+    sync::{broadcast, broadcast::Receiver},
 };
+use tokio::sync::broadcast::Sender;
 
-use model::{State, Statement};
 use model::CommandType::{ChangeColor, Invalid, Quit};
 use model::Statement::{Command, Message};
 
 use crate::error::CommandError;
+use crate::model::User;
 use crate::util::*;
 
 mod error;
@@ -26,16 +25,15 @@ async fn main() -> io::Result<()> {
     let address = format!("{}:{}", SERVER, PORT);
     let listener = TcpListener::bind(address).await?;
     let (tx, rx) = broadcast::channel(16);
-    let state = Arc::new(Mutex::new(State::new(tx)));
     tokio::spawn(async move {
         server_receiver(rx).await
     });
     loop {
         let (socket, addr) = listener.accept().await?;
         println!("Listening to {}", addr);
-        let state = state.clone();
+        let tx = tx.clone();
         tokio::spawn(async move {
-            handle_connection(socket, state).await
+            handle_connection(socket, tx).await
         });
     }
 }
@@ -49,7 +47,7 @@ async fn server_receiver(mut rx: Receiver<String>) {
     }
 }
 
-async fn handle_connection(mut socket: TcpStream<>, state: Arc<Mutex<State>>) -> io::Result<()> {
+async fn handle_connection(mut socket: TcpStream<>, tx: Sender<String>) -> io::Result<()> {
     write_str_to_socket(&mut socket, "Please enter your name: ").await?;
     let username = match get_from_socket(&mut socket).await {
         Ok(stmt) => match stmt {
@@ -64,7 +62,7 @@ async fn handle_connection(mut socket: TcpStream<>, state: Arc<Mutex<State>>) ->
             return Ok(());
         }
     };
-    let mut user = state.lock().await.log_in(&username);
+    let mut user = User::new(username, tx);
     loop {
         write_to_socket(&mut socket, user.get_prompt()).await?;
         tokio::select! {

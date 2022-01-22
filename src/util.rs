@@ -1,8 +1,11 @@
-use tokio::net::TcpStream;
 use std::io;
+
 use ansi_term::Color;
 use tokio::io::AsyncWriteExt;
-use crate::{ChangeColor, Command, CommandError, Invalid, Quit, Statement};
+use tokio::net::TcpStream;
+
+use crate::{ChangeColor, Command, CommandError, Invalid, Quit};
+use crate::model::Statement;
 
 pub(crate) async fn write_to_socket(socket: &mut TcpStream, msg: String) -> io::Result<()> {
     socket.write_all(msg.as_bytes()).await
@@ -67,5 +70,5 @@ pub(crate) fn get_color_from_string(s: String<>) -> Option<Color> {
         "cyan" => Some(Color::Cyan),
         "purple" => Some(Color::Purple),
         _ => None
-    }
+    };
 }
