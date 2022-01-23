@@ -1,5 +1,4 @@
-use std::io;
-use std::io::ErrorKind;
+use std::io::{self, ErrorKind};
 
 use ansi_term::Color;
 use tokio::io::AsyncWriteExt;
@@ -25,12 +24,8 @@ pub(crate) async fn get_from_socket(socket: &mut TcpStream) -> Result<Statement,
                 msg.truncate(n);
                 break;
             }
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                continue;
-            }
-            Err(e) => {
-                return Err(e.into());
-            }
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => continue,
+            Err(e) => return Err(e.into()),
         }
     }
     let statement_str = match String::from_utf8(msg) {

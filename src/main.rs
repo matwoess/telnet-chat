@@ -21,15 +21,15 @@ const PORT: &str = "8001";
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    let address = format!("{}:{}", SERVER, PORT);
-    let listener = TcpListener::bind(address).await?;
+    let server_address = format!("{}:{}", SERVER, PORT);
+    let listener = TcpListener::bind(server_address).await?;
     let (tx, rx) = broadcast::channel(16);
     tokio::spawn(async move {
         server_receiver(rx).await;
     });
     loop {
-        let (socket, addr) = listener.accept().await?;
-        println!("Listening to {}", addr);
+        let (socket, address) = listener.accept().await?;
+        println!("Listening to {}", address);
         let tx = tx.clone();
         tokio::spawn(async move {
             if let Err(e) = handle_connection(socket, tx).await {
@@ -42,8 +42,8 @@ async fn main() -> io::Result<()> {
 async fn server_receiver(mut rx: Receiver<String>) {
     loop {
         match rx.recv().await {
-            Ok(msg) => println!("Broadcast message: '{}'", msg),
-            Err(e) => eprintln!("error: {}", e),
+            Ok(msg) => println!("{}", msg),
+            Err(e) => eprintln!("Error: {}", e),
         }
     }
 }
@@ -52,7 +52,7 @@ async fn handle_connection(mut socket: TcpStream<>, tx: Sender<String>) -> io::R
     write_str_to_socket(&mut socket, "Please enter your name: ").await?;
     let username = match get_from_socket(&mut socket).await {
         Ok(stmt) => match stmt {
-            Message(msg) => msg,
+            Message(username) => username,
             Command(_) => {
                 write_str_to_socket(&mut socket, "Name cannot start with '/'\r\n").await?;
                 return Ok(());
@@ -63,14 +63,13 @@ async fn handle_connection(mut socket: TcpStream<>, tx: Sender<String>) -> io::R
             }
         },
         Err(e) => {
-            println!("error getting username: {}", e);
+            println!("Error getting username: {}", e);
             return Ok(());
         }
     };
     let mut user = User::new(username, tx);
-    match user.tx.send(format!("> {} has joined the chat", user.get_name_prefix())) {
-        Ok(_) => {}
-        Err(e) => println!("error while sending: {}", e),
+    if let Err(e) = user.tx.send(format!("> {} has joined the chat", user.get_name_prefix())) {
+        println!("Error while sending: {}", e);
     }
     loop {
         write_to_socket(&mut socket, user.get_prompt()).await?;
@@ -83,7 +82,7 @@ async fn handle_connection(mut socket: TcpStream<>, tx: Sender<String>) -> io::R
                         }
                     }
                     Err(e) => {
-                        eprintln!("error: {:?}", e);
+                        eprintln!("Error: {:?}", e);
                         break;
                     }
                 }
@@ -92,11 +91,10 @@ async fn handle_connection(mut socket: TcpStream<>, tx: Sender<String>) -> io::R
                 match stmt {
                     Ok(stmt) => {
                         match stmt {
-                            EmptyStatement => println!("empty statement!"),
+                            EmptyStatement => eprintln!("Empty statement!"),
                             Message(msg) => {
-                                match user.tx.send(user.format_message(msg)) {
-                                    Ok(_) => {},
-                                    Err(e) => println!("error while sending: {}", e),
+                                if let Err(e) = user.tx.send(user.format_message(msg)) {
+                                    eprintln!("Error while sending: {}", e);
                                 }
                             },
                             Command(kind) => {
@@ -104,10 +102,10 @@ async fn handle_connection(mut socket: TcpStream<>, tx: Sender<String>) -> io::R
                                     Quit => {
                                         break;
                                     }
-                                    ChangeColor(to_color) =>{
-                                        match get_color_from_string(to_color) {
+                                    ChangeColor(color_string) => {
+                                        match get_color_from_string(color_string) {
+                                            Some(color) => user.color = color,
                                             None => write_str_to_socket(&mut socket, "Invalid color!\r\n").await?,
-                                            Some(col) => user.color = col,
                                         }
                                     }
                                     Invalid => {
@@ -125,9 +123,8 @@ async fn handle_connection(mut socket: TcpStream<>, tx: Sender<String>) -> io::R
             }
         }
     }
-    match user.tx.send(format!("> {} has left the chat", user.get_name_prefix())) {
-        Ok(_) => {}
-        Err(e) => println!("error while sending: {}", e),
+    if let Err(e) = user.tx.send(format!("> {} has left the chat", user.get_name_prefix())) {
+        eprintln!("Error while sending: {}", e);
     }
     socket.shutdown().await?;
     Ok(())

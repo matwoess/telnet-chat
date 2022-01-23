@@ -1,6 +1,5 @@
 use ansi_term::Colour as Color;
-use rand::prelude::IteratorRandom;
-use rand::thread_rng;
+use rand::{thread_rng, prelude::IteratorRandom};
 use tokio::sync::broadcast::{Receiver, Sender};
 
 const COLORS: [Color; 6] = [
@@ -11,6 +10,20 @@ const COLORS: [Color; 6] = [
     Color::Cyan,
     Color::Purple,
 ];
+
+#[derive(Debug)]
+pub(crate) enum CommandType {
+    Quit,
+    ChangeColor(String),
+    Invalid,
+}
+
+#[derive(Debug)]
+pub(crate) enum Statement {
+    Command(CommandType),
+    Message(String),
+    EmptyStatement,
+}
 
 #[derive(Debug)]
 pub(crate) struct User {
@@ -29,28 +42,14 @@ impl User {
     }
 
     pub(crate) fn get_name_prefix(&self) -> String {
-        self.color.paint(format!("[{}]", self.name)).to_string()
+        self.color.paint(format!("\r[{}]", self.name)).to_string()
     }
 
     pub(crate) fn get_prompt(&self) -> String {
-        format!("\r{}: ", self.get_name_prefix())
+        format!("{}: ", self.get_name_prefix())
     }
 
     pub(crate) fn format_message(&self, msg: String) -> String {
         format!("{}{}", self.get_prompt(), msg)
     }
-}
-
-#[derive(Debug)]
-pub(crate) enum CommandType {
-    Quit,
-    ChangeColor(String),
-    Invalid,
-}
-
-#[derive(Debug)]
-pub(crate) enum Statement {
-    Command(CommandType),
-    Message(String),
-    EmptyStatement,
 }
