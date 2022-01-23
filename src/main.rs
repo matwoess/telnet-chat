@@ -1,16 +1,16 @@
 use tokio::{
-    io::{self},
+    io::{self, AsyncWriteExt},
     net::TcpListener,
     net::TcpStream,
-    sync::{broadcast, broadcast::Receiver},
+    sync::broadcast::{self, Receiver, Sender},
 };
-use tokio::io::AsyncWriteExt;
-use tokio::sync::broadcast::Sender;
 
-use model::CommandType::{ChangeColor, Invalid, Quit};
-use model::Statement::{Command, EmptyStatement, Message};
+use model::{
+    CommandType::{ChangeColor, Invalid, Quit},
+    Statement::{Command, EmptyStatement, Message},
+    User,
+};
 
-use crate::model::User;
 use crate::util::*;
 
 mod model;
