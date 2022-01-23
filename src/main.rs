@@ -8,13 +8,11 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::broadcast::Sender;
 
 use model::CommandType::{ChangeColor, Invalid, Quit};
-use model::Statement::{EmptyStatement, Command, Message};
+use model::Statement::{Command, EmptyStatement, Message};
 
-use crate::error::CommandError;
 use crate::model::User;
 use crate::util::*;
 
-mod error;
 mod model;
 mod util;
 
@@ -71,7 +69,7 @@ async fn handle_connection(mut socket: TcpStream<>, tx: Sender<String>) -> io::R
     };
     let mut user = User::new(username, tx);
     match user.tx.send(format!("> {} has joined the chat", user.get_name_prefix())) {
-        Ok(_) => {},
+        Ok(_) => {}
         Err(e) => println!("error while sending: {}", e),
     }
     loop {
@@ -128,7 +126,7 @@ async fn handle_connection(mut socket: TcpStream<>, tx: Sender<String>) -> io::R
         }
     }
     match user.tx.send(format!("> {} has left the chat", user.get_name_prefix())) {
-        Ok(_) => {},
+        Ok(_) => {}
         Err(e) => println!("error while sending: {}", e),
     }
     socket.shutdown().await?;

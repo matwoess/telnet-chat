@@ -1,10 +1,11 @@
 use std::io;
+use std::io::ErrorKind;
 
 use ansi_term::Color;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 
-use crate::{ChangeColor, Command, CommandError, EmptyStatement, Invalid, Quit};
+use crate::{ChangeColor, Command, EmptyStatement, Invalid, Quit};
 use crate::model::Statement;
 
 pub(crate) async fn write_to_socket(socket: &mut TcpStream, msg: String) -> io::Result<()> {
@@ -15,7 +16,7 @@ pub(crate) async fn write_str_to_socket(socket: &mut TcpStream, msg: &str) -> io
     socket.write_all(msg.as_bytes()).await
 }
 
-pub(crate) async fn get_from_socket(socket: &mut TcpStream) -> Result<Statement, CommandError> {
+pub(crate) async fn get_from_socket(socket: &mut TcpStream) -> Result<Statement, io::Error> {
     let mut msg = vec![0; 1024];
     loop {
         socket.readable().await?;
@@ -35,7 +36,7 @@ pub(crate) async fn get_from_socket(socket: &mut TcpStream) -> Result<Statement,
     let statement_str = match String::from_utf8(msg) {
         Ok(s) => s.replace("\r\n", ""),
         Err(e) => {
-            return Err(CommandError::FromUtf8(e.into()));
+            return Err(io::Error::new(ErrorKind::InvalidInput, format!("Invalid input: {}", e)));
         }
     };
     if statement_str.is_empty() {
@@ -61,7 +62,7 @@ pub(crate) async fn get_from_socket(socket: &mut TcpStream) -> Result<Statement,
     Ok(statement)
 }
 
-pub(crate) fn get_color_from_string(s: String<>) -> Option<Color> {
+pub(crate) fn get_color_from_string(s: String) -> Option<Color> {
     return match s.as_str() {
         "red" => Some(Color::Red),
         "green" => Some(Color::Green),
